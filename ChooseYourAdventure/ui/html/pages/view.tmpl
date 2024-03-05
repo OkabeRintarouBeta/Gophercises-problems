@@ -1,0 +1,23 @@
+{{define "title"}}Chapter #{{.Chapter.Title}}{{end}}
+
+{{define "main"}}
+    {{with .Chapter}}
+    <div class='snippet'>
+        <div class='metadata'>
+            <strong>{{.Title}}</strong>
+        </div>
+        <div class='story-text'>
+        {{range .Paragraphs}}
+            <p>{{.}}</p>
+        {{end}}
+        </div>
+        <div class='options'>
+            {{range $index, $option := .Options}}
+                <div class='option'>
+                    <a href='/chapter?title={{$option.Arc}}'>Choice {{add $index 1}}</a>: {{ $option.Text }}
+                </div>
+            {{end}}
+        </div>
+    </div>
+    {{end}}
+{{end}}
