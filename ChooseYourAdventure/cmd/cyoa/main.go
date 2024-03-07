@@ -2,8 +2,8 @@ package main
 
 import (
 	"flag"
+	"log"
 	"net/http"
-	"os"
 	"text/template"
 
 	cyoa "github.com/okaberintaroubeta/cyoa/models"
@@ -27,6 +27,5 @@ func main() {
 		story:         &story,
 		templateCache: templateCache,
 	}
-	err = http.ListenAndServe(":4000", app.routes())
-	os.Exit(1)
+	log.Fatal(http.ListenAndServe(":4000", app.routes()))
 }
