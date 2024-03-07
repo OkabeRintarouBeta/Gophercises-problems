@@ -37,26 +37,8 @@ func main() {
 	var result []string
 	result = bfs(hrefList, *depth)
 
-	toXml := urlset{
-		XmlNS: xmlns,
-	}
+	writeToXml(result)
 
-	xmlFile, err := os.Create("my-file.xml")
-	if err != nil {
-		fmt.Println("Error creating XML file: ", err)
-		return
-	}
-
-	xmlFile.WriteString(xml.Header)
-	enc := xml.NewEncoder(xmlFile)
-	enc.Indent("", "\t")
-
-	for _, res := range result {
-		toXml.Urls = append(toXml.Urls, loc{res})
-	}
-	if err := enc.Encode(toXml); err != nil {
-		panic(err)
-	}
 }
 
 func bfs(hrefList []string, depth int) []string {
@@ -152,5 +134,28 @@ func makeHref(ending, original string) string {
 		return original + "/" + ending
 	} else {
 		return original + ending
+	}
+}
+
+func writeToXml(result []string) {
+	toXml := urlset{
+		XmlNS: xmlns,
+	}
+
+	xmlFile, err := os.Create("my-file.xml")
+	if err != nil {
+		fmt.Println("Error creating XML file: ", err)
+		return
+	}
+
+	xmlFile.WriteString(xml.Header)
+	enc := xml.NewEncoder(xmlFile)
+	enc.Indent("", "\t")
+
+	for _, res := range result {
+		toXml.Urls = append(toXml.Urls, loc{res})
+	}
+	if err := enc.Encode(toXml); err != nil {
+		panic(err)
 	}
 }
