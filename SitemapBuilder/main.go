@@ -1,10 +1,12 @@
 package main
 
 import (
+	"encoding/xml"
 	"flag"
 	"fmt"
-	"io"
 	"net/http"
+	"net/url"
+	"os"
 	"strings"
 
 	. "github.com/okaberintaroubeta/SitemapBuilder/Link"
@@ -12,80 +14,109 @@ import (
 
 var visited map[string]bool
 
+const xmlns = "http://www.sitemaps.org/schemas/sitemap/0.9"
+
+type loc struct {
+	Value string `xml:"loc"`
+}
+
+type urlset struct {
+	Urls  []loc  `xml:"url"`
+	XmlNS string `xml:"xmlns,attr"`
+}
+
 func main() {
-	siteURL := flag.String("url", "https://www.calhoun.io/", "URL for the target website")
+	siteURL := flag.String("url", "http://google.com", "URL for the target website")
+	depth := flag.Int("depth", 1, "Search depth for the URL")
 	flag.Parse()
+
 	visited = make(map[string]bool)
 
 	var hrefList []string
 	hrefList = append(hrefList, *siteURL)
 	var result []string
-	result = bfs(hrefList, 2)
-	for _, href := range result {
-		fmt.Println(href)
+	result = bfs(hrefList, *depth)
+
+	toXml := urlset{
+		XmlNS: xmlns,
 	}
 
-}
-
-func getHTML(URL string) (string, error) {
-	resp, err := http.Get(URL)
-	// fmt.Println("----------------------------")
+	xmlFile, err := os.Create("my-file.xml")
 	if err != nil {
-		// fmt.Errorf("GET error: %v", err)
-		return "", err
+		fmt.Println("Error creating XML file: ", err)
+		return
 	}
-	// fmt.Println("----------------------------")
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		// fmt.Printf("Status error: %v\n", resp.StatusCode)
-		return "", err
-	}
-	// fmt.Println("----------------------------")
 
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		// fmt.Printf("Read body: %v\n", err)
-		return "", err
+	xmlFile.WriteString(xml.Header)
+	enc := xml.NewEncoder(xmlFile)
+	enc.Indent("", "\t")
+
+	for _, res := range result {
+		toXml.Urls = append(toXml.Urls, loc{res})
 	}
-	// fmt.Println("----------------------------")
-	return string(data), nil
+	if err := enc.Encode(toXml); err != nil {
+		panic(err)
+	}
 }
 
 func bfs(hrefList []string, depth int) []string {
 
+	// Get the base URL
+	resp, err := http.Get(hrefList[0])
+	if err != nil {
+		fmt.Println("Error:", err)
+		return nil
+	}
+	reqUrl := resp.Request.URL
+	defer resp.Body.Close()
+	baseUrl := &url.URL{
+		Scheme: reqUrl.Scheme,
+		Host:   reqUrl.Host,
+	}
+	base := baseUrl.String()
+
 	var result []string
-	for len(hrefList) > 0 && depth > 0 {
+
+	// BFS Search with maximum depth
+	for len(hrefList) > 0 && depth >= 0 {
 		var newHrefList []string
 		for _, href := range hrefList {
-			result = append(result, href)
-			// fmt.Println(len(result))
-			content, err := getHTML(href)
-			// fmt.Println(content)
+
+			resp, err := http.Get(href)
 			if err != nil {
-				fmt.Printf("Content of %s can't be retrieved\n ERROR: %s\n", href, err)
 				continue
 			}
-			r := strings.NewReader(content)
-			links, err := ParseLink(r)
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				// fmt.Printf("Status error: %v\n", resp.StatusCode)
+				continue
+			}
+
+			reqUrl := resp.Request.URL
+
+			// Get all links in <a> tag
+			links, err := ParseLink(resp.Body)
 			if err != nil && len(links) > 0 {
 				continue
 			}
+			// make sure the link is valid before appending it to the final result
+			result = append(result, reqUrl.String())
+
 			for _, l := range links {
-				// fmt.Println(l.Href)
-				has := visited[l.Href]
-				if has == false && isSameSoure(l.Href, hrefList[0]) {
-					visited[l.Href] = true
-					hrefList = append(hrefList, l.Href)
-					newHrefList = append(newHrefList, l.Href)
-				} else if has == false && len(l.Href) > 1 && l.Href[0] == '/' {
-					// fmt.Println("added url:", hrefList[0]+l.Href)
-					newHref := makeHref(l.Href, hrefList[0])
-					if visited[newHref] == false {
-						visited[newHref] = true
-						hrefList = append(hrefList, newHref)
-						newHrefList = append(newHrefList, newHref)
-					}
+				var newHref string
+				// If the new href appears to be part of the url
+				// add it to the end of the base to make a new url
+				if len(l.Href) > 1 && (strings.HasPrefix(l.Href, "/") || !strings.HasPrefix(l.Href, base)) {
+					newHref = makeHref(l.Href, base)
+				} else {
+					newHref = l.Href
 				}
+				// If the new href belongs to the same site as the base
+				// Then append it to the new layer of BFS
+				if filterURL(newHref, base) {
+					newHrefList = append(newHrefList, newHref)
+				}
+
 			}
 		}
 		hrefList = newHrefList
@@ -100,6 +131,18 @@ func isSameSoure(newURL, source string) bool {
 		return false
 	}
 	return newURL[:len(source)] == source
+}
+
+// Check if the new URL has already been visited or share the same prefix as the base
+func filterURL(newURL, base string) bool {
+	if visited[newURL] {
+		return false
+	}
+	visited[newURL] = true
+	if strings.HasPrefix(newURL, base) {
+		return true
+	}
+	return false
 }
 
 func makeHref(ending, original string) string {
