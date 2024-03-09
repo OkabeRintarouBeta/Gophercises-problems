@@ -1,20 +1,67 @@
 package main
 
 import (
-	"database/sql"
-	"encoding/csv"
-	"flag"
+	"fmt"
 	"os"
 	"unicode"
 
-	"github.com/okaberintaroubeta/phoneNumberNormalizer/psqldb"
+	_ "github.com/lib/pq"
+	phonedb "github.com/okaberintaroubeta/phoneNumberNormalizer/db"
 )
 
-type Identity struct {
-	Name  string
-	Phone string
+var (
+	host     = "localhost"
+	port     = 5432
+	user     = "postgres"
+	password = os.Getenv("DB_PASSWORD")
+	dbname   = "phonedb"
+)
+
+func main() {
+
+	psqlInfo := fmt.Sprintf("host=%s port=%d user=%s "+
+		"password=%s dbname=%s sslmode=disable",
+		host, port, user, password, dbname)
+	must(phonedb.Reset("postgres", psqlInfo, dbname))
+
+	psqlInfo = fmt.Sprintf("%s dbname=%s", psqlInfo, dbname)
+
+	must(phonedb.Migrate("postgres", psqlInfo))
+
+	db, err := phonedb.Open("postgres", psqlInfo)
+	must(err)
+	defer db.CloseConnection()
+
+	err = db.Seed()
+	must(err)
+
+	phones, err := db.ListRecord()
+	must(err)
+	for _, p := range phones {
+		fmt.Printf("Working on... %+v\n", p)
+		number := normalize(p.Number)
+		if number != p.Number {
+			fmt.Println("Updating or removing...", number)
+			existing, err := db.FindPhone(number)
+			must(err)
+			if existing != nil {
+				must(db.DeleteRecord(p.Id))
+			} else {
+				p.Number = number
+				must(db.UpdateRecord(&p))
+			}
+		} else {
+			fmt.Println("No changes required")
+		}
+	}
+
 }
 
+func must(err error) {
+	if err != nil {
+		panic(err)
+	}
+}
 func normalize(phone string) string {
 	var ans string
 	for _, ch := range phone {
@@ -23,49 +70,4 @@ func normalize(phone string) string {
 		}
 	}
 	return ans
-}
-
-func main() {
-	path := flag.String("path", "data.csv", "Path to the phone book")
-	flag.Parse()
-
-	db, err := psqldb.Connect()
-	if err != nil {
-		panic(err)
-	}
-	addEntries(*path, db)
-
-	psqldb.ListRecord(db)
-
-	psqldb.Update(db, "John", normalize("(1582341)234"))
-	psqldb.DeleteRecord(db, "Sammie")
-	psqldb.ListRecord(db)
-	psqldb.CloseConnection(db)
-}
-
-func addEntries(path string, db *sql.DB) {
-	var identities []Identity
-	file, err := os.Open(path)
-	if err != nil {
-		panic(err)
-	}
-	reader := csv.NewReader(file)
-	data, err := reader.ReadAll()
-	if err != nil {
-		panic(err)
-	}
-
-	for _, row := range data {
-		if len(row) < 2 {
-			continue
-		}
-		identities = append(identities, Identity{row[0], normalize(row[1])})
-	}
-
-	for _, identity := range identities {
-		err = psqldb.InsertRecord(db, identity.Name, identity.Phone)
-		if err != nil {
-			panic(err)
-		}
-	}
 }

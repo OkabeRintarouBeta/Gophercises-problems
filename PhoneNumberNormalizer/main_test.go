@@ -1,6 +1,8 @@
 package main
 
-import "testing"
+import (
+	"testing"
+)
 
 func TestNormalize(t *testing.T) {
 	testCases := []struct {
